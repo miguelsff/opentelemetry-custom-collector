@@ -116,16 +116,104 @@ stop.sh                # Script de parada
 
 ## Enviar datos de prueba
 
-Con el collector corriendo, puedes enviar traces de prueba:
+Con el collector corriendo, puedes enviar datos de prueba via HTTP (puerto 4318):
+
+### Enviar traces
 
 ```bash
-# Via gRPC (puerto 4317)
-# Usa cualquier SDK de OpenTelemetry apuntando a localhost:4317
-
-# Via HTTP (puerto 4318)
 curl -X POST http://localhost:4318/v1/traces \
   -H "Content-Type: application/json" \
-  -d '{"resourceSpans":[]}'
+  -d '{
+    "resourceSpans": [{
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "mi-servicio-test" } },
+          { "key": "service.version", "value": { "stringValue": "1.0.0" } }
+        ]
+      },
+      "scopeSpans": [{
+        "scope": { "name": "test-scope" },
+        "spans": [{
+          "traceId": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+          "spanId": "b1c2d3e4f5a6b1c2",
+          "name": "GET /api/users",
+          "kind": 2,
+          "startTimeUnixNano": "1700000000000000000",
+          "endTimeUnixNano": "1700000000500000000",
+          "attributes": [
+            { "key": "http.method", "value": { "stringValue": "GET" } },
+            { "key": "http.status_code", "value": { "intValue": "200" } },
+            { "key": "http.url", "value": { "stringValue": "https://api.example.com/users" } }
+          ],
+          "status": { "code": 1 }
+        }]
+      }]
+    }]
+  }'
 ```
 
-Los datos recibidos apareceran en los logs del collector (`bash status.sh`).
+### Enviar metricas
+
+```bash
+curl -X POST http://localhost:4318/v1/metrics \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resourceMetrics": [{
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "mi-servicio-test" } }
+        ]
+      },
+      "scopeMetrics": [{
+        "scope": { "name": "test-scope" },
+        "metrics": [{
+          "name": "http.request.duration",
+          "unit": "ms",
+          "gauge": {
+            "dataPoints": [{
+              "asDouble": 125.5,
+              "timeUnixNano": "1700000000000000000",
+              "attributes": [
+                { "key": "http.method", "value": { "stringValue": "GET" } },
+                { "key": "http.route", "value": { "stringValue": "/api/users" } }
+              ]
+            }]
+          }
+        }]
+      }]
+    }]
+  }'
+```
+
+### Enviar logs
+
+```bash
+curl -X POST http://localhost:4318/v1/logs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resourceLogs": [{
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "mi-servicio-test" } }
+        ]
+      },
+      "scopeLogs": [{
+        "scope": { "name": "test-scope" },
+        "logRecords": [{
+          "timeUnixNano": "1700000000000000000",
+          "severityNumber": 9,
+          "severityText": "INFO",
+          "body": { "stringValue": "Usuario login exitoso: user_id=12345, ip=192.168.1.100" },
+          "attributes": [
+            { "key": "event.name", "value": { "stringValue": "user.login" } },
+            { "key": "user.id", "value": { "stringValue": "12345" } }
+          ]
+        }]
+      }]
+    }]
+  }'
+```
+
+Los datos recibidos apareceran en los logs del collector con detalle completo (`bash status.sh`).
+
+> **Tip:** Para enviar datos via gRPC (puerto 4317), usa cualquier SDK de OpenTelemetry apuntando a `localhost:4317`.
