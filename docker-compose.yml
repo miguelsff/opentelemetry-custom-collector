@@ -6,6 +6,7 @@ services:
       args:
         GO_VERSION: ${GO_VERSION:-1.25.8}
         OCB_VERSION: ${OCB_VERSION:-0.148.0}
+        COLLECTOR_NAME: ${COLLECTOR_NAME:-otelcol-custom}
     image: ${COLLECTOR_IMAGE_NAME:-otelcol-custom}:latest
     container_name: ${COLLECTOR_CONTAINER_NAME:-otelcol-custom}
     restart: unless-stopped

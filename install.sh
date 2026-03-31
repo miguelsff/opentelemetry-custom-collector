@@ -59,6 +59,10 @@ if [ "$PORTS_OK" = false ]; then
 fi
 
 echo ""
+echo "=== Generating builder-config.yaml from .env ==="
+bash "$SCRIPT_DIR/generate-builder-config.sh"
+
+echo ""
 echo "=== Building and starting the collector ==="
 cd "$SCRIPT_DIR"
 docker compose build

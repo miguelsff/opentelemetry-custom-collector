@@ -9,6 +9,7 @@ RUN apk --update add ca-certificates
 FROM golang:${GO_VERSION} AS build-stage
 
 ARG OCB_VERSION=0.148.0
+ARG COLLECTOR_NAME=otelcol-custom
 WORKDIR /build
 COPY ./builder-config.yaml builder-config.yaml
 
@@ -23,14 +24,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Stage 3: Minimal runtime image
 FROM gcr.io/distroless/base:latest
 
+ARG COLLECTOR_NAME=otelcol-custom
 ARG USER_UID=10001
 USER ${USER_UID}
 
 COPY ./collector-config.yaml /otelcol/collector-config.yaml
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --chmod=755 --from=build-stage /build/otelcol-custom/otelcol-custom /otelcol/otelcol-custom
+COPY --chmod=755 --from=build-stage /build/${COLLECTOR_NAME}/${COLLECTOR_NAME} /otelcol/${COLLECTOR_NAME}
 
-ENTRYPOINT ["/otelcol/otelcol-custom"]
+ENTRYPOINT ["/otelcol/${COLLECTOR_NAME}"]
 CMD ["--config", "/otelcol/collector-config.yaml"]
 
 EXPOSE 4317 4318 13133
