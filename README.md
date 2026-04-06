@@ -256,42 +256,61 @@ Cada ambiente tiene su propio ACR, Container App y Log Analytics Workspace.
 
 Antes de que los pipelines funcionen, necesitas conectar GitHub con tu cuenta de Azure. Esto se hace **una sola vez** siguiendo estos pasos en orden.
 
-#### Paso 1: Crear las credenciales de acceso para GitHub
+#### Paso 1: Crear los Service Principals en Azure
 
-Este paso le dice a Azure: *"confiale a este repositorio de GitHub"*. Se crea una identidad (App Registration) y se le da permiso para desplegar recursos.
+Se crea una identidad (Service Principal) por cada ambiente para que GitHub Actions pueda autenticarse en Azure. Siguiendo la nomenclatura organizacional:
 
-Puedes hacerlo desde el **portal web** o con la **CLI**. Elige la que prefieras, el resultado es el mismo.
+| Campo | Significado |
+|---|---|
+| `SVPR` | Prefijo fijo para Service Principals |
+| `OTEL` | Codigo del aplicativo (OTel Collector) |
+| `APP` | Identidad de aplicacion |
+| `DES / CER / PRO` | Ambiente (desarrollo / certificacion / produccion) |
+| `01` | Numero correlativo |
+
+Los tres Service Principals que vas a crear son:
+
+| Ambiente | Nombre | Rama de GitHub |
+|---|---|---|
+| Dev | `SVPROTELAPPDES01` | `develop` |
+| QA | `SVPROTELAPPCER01` | `release/*` |
+| Prod | `SVPROTELAPPPRO01` | `main` |
+
+> Este proyecto usa **OIDC con Federated Credentials** en vez de secreto de cliente. Esto es mas seguro porque no hay contraseña que rotar ni que pueda filtrarse — GitHub y Azure se autentican mutuamente usando tokens temporales firmados.
+
+Puedes crearlos desde el **portal web** o con la **CLI**. Elige la que prefieras, el resultado es el mismo.
 
 <details>
 <summary><strong>Opcion A: Portal de Azure (sin instalar nada)</strong></summary>
 
+Repite estos pasos **3 veces**, una por cada ambiente (dev, qa, prod).
+
 **1. Crear la App Registration**
 
 1. Ve a [portal.azure.com](https://portal.azure.com)
-2. Busca **"App registrations"** en la barra de busqueda superior
+2. Busca **"App registrations"** en la barra de busqueda
 3. Click en **New registration**
-4. Nombre: `github-otelcol-deployer` → Click en **Register**
-5. En la pagina que se abre, copia y guarda:
-   - **Application (client) ID** → es tu `AZURE_CLIENT_ID`
-   - **Directory (tenant) ID** → es tu `AZURE_TENANT_ID`
+4. Nombre: segun la tabla de arriba (ej: `SVPROTELAPPDES01` para dev) → **Register**
+5. Copia y guarda:
+   - **Application (client) ID** → es tu `AZURE_CLIENT_ID` para este ambiente
+   - **Directory (tenant) ID** → es tu `AZURE_TENANT_ID` (igual en los 3)
 
 **2. Asignar permisos**
 
-1. Busca **"Subscriptions"** en la barra de busqueda
-2. Entra a tu suscripcion y copia el **Subscription ID** → es tu `AZURE_SUBSCRIPTION_ID`
-3. Click en **Access control (IAM)** en el menu izquierdo
-4. Click en **Add > Add role assignment**
-5. Busca y selecciona el rol **Contributor** → click **Next**
-6. Click en **Select members** → busca `github-otelcol-deployer` → Select
-7. Click en **Review + assign**
+1. Busca **"Subscriptions"** → entra a tu suscripcion
+2. Copia el **Subscription ID** → es tu `AZURE_SUBSCRIPTION_ID` (igual en los 3)
+3. Click en **Access control (IAM)** → **Add > Add role assignment**
+4. Rol: **Contributor** → Next
+5. **Select members** → busca el nombre del SP (ej: `SVPROTELAPPDES01`) → Select
+6. **Review + assign**
 
-**3. Crear las Federated Credentials**
+**3. Crear la Federated Credential**
 
-1. Vuelve a **App registrations** → entra a `github-otelcol-deployer`
+1. Vuelve a **App registrations** → entra al SP que acabas de crear
 2. Menu izquierdo: **Certificates & secrets** → tab **Federated credentials**
-3. Click en **Add credential** — repite 3 veces con estos valores:
+3. Click en **Add credential** con estos valores segun el ambiente:
 
-| Campo | Credential 1 | Credential 2 | Credential 3 |
+| Campo | Dev | QA | Prod |
 |---|---|---|---|
 | Scenario | GitHub Actions | GitHub Actions | GitHub Actions |
 | Organization | `miguelsff` | `miguelsff` | `miguelsff` |
@@ -303,67 +322,73 @@ Puedes hacerlo desde el **portal web** o con la **CLI**. Elige la que prefieras,
 </details>
 
 <details>
-<summary><strong>Opcion B: Azure CLI (mas rapido si la tienes instalada)</strong></summary>
+<summary><strong>Opcion B: Azure CLI</strong></summary>
 
 Instala Azure CLI si no la tienes:
 - **Windows:** [aka.ms/installazurecliwindows](https://aka.ms/installazurecliwindows)
 - **Mac:** `brew install azure-cli`
 - **Linux:** `curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`
 
-Luego ejecuta:
-
 ```bash
 az login   # abre el navegador para autenticarte
 ```
 
-Copia y ejecuta este bloque completo (cambia el valor de `REPO`):
+Ejecuta este script **3 veces**, cambiando los valores de las variables en cada ejecucion:
 
 ```bash
+# --- Cambia estos valores segun el ambiente ---
+servicePrincipalName="SVPROTELAPPDES01"   # SVPROTELAPPDES01 | SVPROTELAPPCER01 | SVPROTELAPPPRO01
+BRANCH="develop"                           # develop          | release/*        | main
+CRED_NAME="github-develop"                 # github-develop   | github-release   | github-main
 REPO="miguelsff/opentelemetry-custom-collector"
-
-APP_ID=$(az ad app create --display-name "github-otelcol-deployer" --query appId -o tsv)
-az ad sp create --id "$APP_ID"
-SP_OBJECT_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
+# ----------------------------------------------
 
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 TENANT_ID=$(az account show --query tenantId -o tsv)
+
+# Crea el Service Principal (sin secreto, usaremos OIDC)
+servicePrincipalAppId=$(az ad sp create-for-rbac \
+  --name "$servicePrincipalName" \
+  --skip-assignment \
+  --query appId -o tsv)
+
+sleep 5
+
+SP_OBJECT_ID=$(az ad sp show --id "$servicePrincipalAppId" --query id -o tsv)
+
+# Asigna permisos para crear recursos en la suscripcion
 az role assignment create \
   --assignee-object-id "$SP_OBJECT_ID" \
   --assignee-principal-type ServicePrincipal \
   --role Contributor \
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
-for BRANCH in develop main; do
-  az ad app federated-credential create --id "$APP_ID" --parameters "{
-    \"name\": \"github-${BRANCH}\",
-    \"issuer\": \"https://token.actions.githubusercontent.com\",
-    \"subject\": \"repo:${REPO}:ref:refs/heads/${BRANCH}\",
-    \"audiences\": [\"api://AzureADTokenExchange\"]
-  }"
-done
-az ad app federated-credential create --id "$APP_ID" --parameters "{
-  \"name\": \"github-release\",
+# Configura la autenticacion OIDC con GitHub (sin secreto)
+az ad app federated-credential create --id "$servicePrincipalAppId" --parameters "{
+  \"name\": \"$CRED_NAME\",
   \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"repo:${REPO}:ref:refs/heads/release/*\",
+  \"subject\": \"repo:${REPO}:ref:refs/heads/${BRANCH}\",
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }"
 
-echo "AZURE_CLIENT_ID:       $APP_ID"
-echo "AZURE_TENANT_ID:       $TENANT_ID"
-echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
+echo ""
+echo "Service Principal Name: $servicePrincipalName"
+echo "AZURE_CLIENT_ID:        $servicePrincipalAppId"
+echo "AZURE_TENANT_ID:        $TENANT_ID"
+echo "AZURE_SUBSCRIPTION_ID:  $SUBSCRIPTION_ID"
 ```
 
 </details>
 
-Al terminar (por cualquier opcion) debes tener estos tres valores anotados:
+Al terminar debes tener anotados estos valores para cada ambiente:
 
-```
-AZURE_CLIENT_ID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_TENANT_ID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_SUBSCRIPTION_ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-```
+| | Dev | QA | Prod |
+|---|---|---|---|
+| `AZURE_CLIENT_ID` | ID de `SVPROTELAPPDES01` | ID de `SVPROTELAPPCER01` | ID de `SVPROTELAPPPRO01` |
+| `AZURE_TENANT_ID` | (mismo en los 3) | (mismo en los 3) | (mismo en los 3) |
+| `AZURE_SUBSCRIPTION_ID` | (mismo en los 3) | (mismo en los 3) | (mismo en los 3) |
 
-#### Paso 4: Guardar las credenciales en GitHub
+#### Paso 2: Guardar las credenciales en GitHub
 
 GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipelines. Se guardan como secrets dentro de cada "environment" (dev, qa, prod).
 
@@ -379,15 +404,15 @@ GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipeli
 | `AZURE_CLIENT_ID` | El valor `AZURE_CLIENT_ID` del paso anterior |
 | `AZURE_TENANT_ID` | El valor `AZURE_TENANT_ID` del paso anterior |
 | `AZURE_SUBSCRIPTION_ID` | El valor `AZURE_SUBSCRIPTION_ID` del paso anterior |
-| `ACR_LOGIN_SERVER` | Lo obtendras despues del paso 5 (ej: `acrotelcoldev.azurecr.io`) |
+| `ACR_LOGIN_SERVER` | Lo obtendras despues del paso 3 (ej: `acrotelcoldev.azurecr.io`) |
 | `OTLP_EXPORT_ENDPOINT` | URL de tu backend OTLP (ej: `https://otlp.tubackend.com:4317`) |
 | `TLS_CLIENT_CERT` | Ver seccion "Certificados TLS" mas abajo |
 | `TLS_CLIENT_KEY` | Ver seccion "Certificados TLS" mas abajo |
 | `TLS_CA_CERT` | Ver seccion "Certificados TLS" mas abajo |
 
-> Por ahora agrega los primeros tres (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 5.
+> Por ahora agrega los primeros tres (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 3.
 
-#### Paso 5: Crear la infraestructura en Azure
+#### Paso 3: Crear la infraestructura en Azure
 
 Con las credenciales ya configuradas en GitHub, el workflow `bootstrap.yml` crea todos los recursos de Azure automaticamente (sin que necesites hacer nada en el portal de Azure ni instalar Terraform).
 
@@ -407,11 +432,11 @@ Espera a que termine (tarda 5-10 minutos). Esto crea en Azure:
 - Log Analytics Workspace — para ver los logs de la aplicacion
 - Container Apps Environment y Container App — donde corre el collector
 
-Al terminar, busca en los logs el valor de `ACR_LOGIN_SERVER` para cada ambiente y agregalo como secret en el paso 4.
+Al terminar, busca en los logs el valor de `ACR_LOGIN_SERVER` para cada ambiente y agregalo como secret en el paso 2.
 
 > Para encontrarlo: en el Portal de Azure busca "Container registries", entra al ACR del ambiente y copia el valor de **Login server**.
 
-#### Paso 6: Crear la rama develop
+#### Paso 4: Crear la rama develop
 
 ```bash
 git checkout -b develop
@@ -420,7 +445,7 @@ git push -u origin develop
 
 > Esta rama es obligatoria: es el punto de entrada para el pipeline de dev.
 
-### Paso 6: Flujo GitFlow
+### Paso 5: Flujo GitFlow
 
 #### Desarrollo (feature -> dev)
 
