@@ -256,44 +256,75 @@ Cada ambiente tiene su propio ACR, Container App y Log Analytics Workspace.
 
 Antes de que los pipelines funcionen, necesitas conectar GitHub con tu cuenta de Azure. Esto se hace **una sola vez** siguiendo estos pasos en orden.
 
-#### Paso 1: Instalar Azure CLI
-
-Azure CLI es una herramienta de linea de comandos para gestionar recursos de Azure. Solo la necesitas para esta configuracion inicial.
-
-- **Windows:** Descarga el instalador desde [aka.ms/installazurecliwindows](https://aka.ms/installazurecliwindows)
-- **Mac:** `brew install azure-cli`
-- **Linux:** `curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`
-
-Verifica que quedo instalado:
-
-```bash
-az --version
-```
-
-#### Paso 2: Conectar Azure CLI con tu cuenta
-
-```bash
-az login
-```
-
-Se abre el navegador para que ingreses con tu cuenta de Azure. Al terminar, el terminal muestra tu suscripcion activa.
-
-#### Paso 3: Crear las credenciales de acceso para GitHub
+#### Paso 1: Crear las credenciales de acceso para GitHub
 
 Este paso le dice a Azure: *"confiale a este repositorio de GitHub"*. Se crea una identidad (App Registration) y se le da permiso para desplegar recursos.
 
-Copia y ejecuta este bloque completo en tu terminal:
+Puedes hacerlo desde el **portal web** o con la **CLI**. Elige la que prefieras, el resultado es el mismo.
+
+<details>
+<summary><strong>Opcion A: Portal de Azure (sin instalar nada)</strong></summary>
+
+**1. Crear la App Registration**
+
+1. Ve a [portal.azure.com](https://portal.azure.com)
+2. Busca **"App registrations"** en la barra de busqueda superior
+3. Click en **New registration**
+4. Nombre: `github-otelcol-deployer` → Click en **Register**
+5. En la pagina que se abre, copia y guarda:
+   - **Application (client) ID** → es tu `AZURE_CLIENT_ID`
+   - **Directory (tenant) ID** → es tu `AZURE_TENANT_ID`
+
+**2. Asignar permisos**
+
+1. Busca **"Subscriptions"** en la barra de busqueda
+2. Entra a tu suscripcion y copia el **Subscription ID** → es tu `AZURE_SUBSCRIPTION_ID`
+3. Click en **Access control (IAM)** en el menu izquierdo
+4. Click en **Add > Add role assignment**
+5. Busca y selecciona el rol **Contributor** → click **Next**
+6. Click en **Select members** → busca `github-otelcol-deployer` → Select
+7. Click en **Review + assign**
+
+**3. Crear las Federated Credentials**
+
+1. Vuelve a **App registrations** → entra a `github-otelcol-deployer`
+2. Menu izquierdo: **Certificates & secrets** → tab **Federated credentials**
+3. Click en **Add credential** — repite 3 veces con estos valores:
+
+| Campo | Credential 1 | Credential 2 | Credential 3 |
+|---|---|---|---|
+| Scenario | GitHub Actions | GitHub Actions | GitHub Actions |
+| Organization | `miguelsff` | `miguelsff` | `miguelsff` |
+| Repository | `opentelemetry-custom-collector` | `opentelemetry-custom-collector` | `opentelemetry-custom-collector` |
+| Entity type | Branch | Branch | Branch |
+| Branch | `develop` | `release/*` | `main` |
+| Name | `github-develop` | `github-release` | `github-main` |
+
+</details>
+
+<details>
+<summary><strong>Opcion B: Azure CLI (mas rapido si la tienes instalada)</strong></summary>
+
+Instala Azure CLI si no la tienes:
+- **Windows:** [aka.ms/installazurecliwindows](https://aka.ms/installazurecliwindows)
+- **Mac:** `brew install azure-cli`
+- **Linux:** `curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`
+
+Luego ejecuta:
 
 ```bash
-# Cambia esto por tu repo en formato usuario/repositorio
+az login   # abre el navegador para autenticarte
+```
+
+Copia y ejecuta este bloque completo (cambia el valor de `REPO`):
+
+```bash
 REPO="miguelsff/opentelemetry-custom-collector"
 
-# Crea la identidad para GitHub Actions
 APP_ID=$(az ad app create --display-name "github-otelcol-deployer" --query appId -o tsv)
 az ad sp create --id "$APP_ID"
 SP_OBJECT_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
 
-# Le da permisos para crear recursos en tu suscripcion
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 TENANT_ID=$(az account show --query tenantId -o tsv)
 az role assignment create \
@@ -302,7 +333,6 @@ az role assignment create \
   --role Contributor \
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
-# Configura que GitHub puede usar esta identidad desde las ramas del proyecto
 for BRANCH in develop main; do
   az ad app federated-credential create --id "$APP_ID" --parameters "{
     \"name\": \"github-${BRANCH}\",
@@ -318,18 +348,20 @@ az ad app federated-credential create --id "$APP_ID" --parameters "{
   \"audiences\": [\"api://AzureADTokenExchange\"]
 }"
 
-# Muestra los valores que necesitas guardar
-echo ""
-echo "========================================"
-echo "Guarda estos valores, los necesitas en el siguiente paso:"
-echo ""
 echo "AZURE_CLIENT_ID:       $APP_ID"
 echo "AZURE_TENANT_ID:       $TENANT_ID"
 echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
-echo "========================================"
 ```
 
-Copia los tres valores que aparecen al final. Los usaras en el siguiente paso.
+</details>
+
+Al terminar (por cualquier opcion) debes tener estos tres valores anotados:
+
+```
+AZURE_CLIENT_ID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_TENANT_ID:       xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_SUBSCRIPTION_ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
 
 #### Paso 4: Guardar las credenciales en GitHub
 
