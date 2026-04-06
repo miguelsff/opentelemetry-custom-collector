@@ -225,7 +225,9 @@ Los datos recibidos apareceran en los logs del collector con detalle completo (`
 
 El proyecto incluye Terraform y GitHub Actions para desplegar automaticamente en **Azure Container Apps** con tres ambientes: dev, qa y prod, usando GitFlow.
 
-### Arquitectura
+### Como funciona
+
+Cada vez que haces push a ciertas ramas, GitHub Actions ejecuta el pipeline automaticamente:
 
 ```
 feature/* ──► develop ──► release/* ──► main
@@ -233,89 +235,158 @@ feature/* ──► develop ──► release/* ──► main
               CI+CD          CI+CD       CI+CD
                 │              │           │
               ┌─▼─┐        ┌──▼──┐     ┌──▼──┐
-              │DEV│        │ QA  │     │PROD │ (approval)
+              │DEV│        │ QA  │     │PROD │ (requiere aprobacion)
               └───┘        └─────┘     └─────┘
 ```
 
+El pipeline por cada ambiente corre estos stages en orden:
+1. **Preparation** - Registra metadata (autor, rama, commit, fecha)
+2. **Build & Test** - Compila la imagen Docker y verifica que arranque
+3. **SAST** - Escaneo de seguridad del codigo fuente (Fortify)
+4. **QA** - Analisis de calidad del codigo (SonarQube)
+5. **Upload** - Sube la imagen a Azure Container Registry
+6. **SCA** - Escaneo de vulnerabilidades en dependencias (JFrog Xray)
+7. **Deploy** - Despliega la infraestructura y la imagen en Azure
+
 Cada ambiente tiene su propio ACR, Container App y Log Analytics Workspace.
 
-### Paso 1: Prerequisitos
+---
 
-- Repositorio en GitHub con permisos de administrador
-- Una suscripcion de Azure activa
+### Configuracion inicial (solo la primera vez)
 
-> **No se necesita instalar Terraform ni Azure CLI localmente.** Todo se ejecuta desde GitHub Actions.
+Antes de que los pipelines funcionen, necesitas conectar GitHub con tu cuenta de Azure. Esto se hace **una sola vez** siguiendo estos pasos en orden.
 
-### Paso 2: Configurar GitHub Environments y Secrets
+#### Paso 1: Instalar Azure CLI
 
-En tu repositorio de GitHub, ve a **Settings > Environments** y crea tres environments:
+Azure CLI es una herramienta de linea de comandos para gestionar recursos de Azure. Solo la necesitas para esta configuracion inicial.
 
-| Environment | Proteccion |
+- **Windows:** Descarga el instalador desde [aka.ms/installazurecliwindows](https://aka.ms/installazurecliwindows)
+- **Mac:** `brew install azure-cli`
+- **Linux:** `curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`
+
+Verifica que quedo instalado:
+
+```bash
+az --version
+```
+
+#### Paso 2: Conectar Azure CLI con tu cuenta
+
+```bash
+az login
+```
+
+Se abre el navegador para que ingreses con tu cuenta de Azure. Al terminar, el terminal muestra tu suscripcion activa.
+
+#### Paso 3: Crear las credenciales de acceso para GitHub
+
+Este paso le dice a Azure: *"confiale a este repositorio de GitHub"*. Se crea una identidad (App Registration) y se le da permiso para desplegar recursos.
+
+Copia y ejecuta este bloque completo en tu terminal:
+
+```bash
+# Cambia esto por tu repo en formato usuario/repositorio
+REPO="miguelsff/opentelemetry-custom-collector"
+
+# Crea la identidad para GitHub Actions
+APP_ID=$(az ad app create --display-name "github-otelcol-deployer" --query appId -o tsv)
+az ad sp create --id "$APP_ID"
+SP_OBJECT_ID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
+
+# Le da permisos para crear recursos en tu suscripcion
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+TENANT_ID=$(az account show --query tenantId -o tsv)
+az role assignment create \
+  --assignee-object-id "$SP_OBJECT_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role Contributor \
+  --scope "/subscriptions/$SUBSCRIPTION_ID"
+
+# Configura que GitHub puede usar esta identidad desde las ramas del proyecto
+for BRANCH in develop main; do
+  az ad app federated-credential create --id "$APP_ID" --parameters "{
+    \"name\": \"github-${BRANCH}\",
+    \"issuer\": \"https://token.actions.githubusercontent.com\",
+    \"subject\": \"repo:${REPO}:ref:refs/heads/${BRANCH}\",
+    \"audiences\": [\"api://AzureADTokenExchange\"]
+  }"
+done
+az ad app federated-credential create --id "$APP_ID" --parameters "{
+  \"name\": \"github-release\",
+  \"issuer\": \"https://token.actions.githubusercontent.com\",
+  \"subject\": \"repo:${REPO}:ref:refs/heads/release/*\",
+  \"audiences\": [\"api://AzureADTokenExchange\"]
+}"
+
+# Muestra los valores que necesitas guardar
+echo ""
+echo "========================================"
+echo "Guarda estos valores, los necesitas en el siguiente paso:"
+echo ""
+echo "AZURE_CLIENT_ID:       $APP_ID"
+echo "AZURE_TENANT_ID:       $TENANT_ID"
+echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
+echo "========================================"
+```
+
+Copia los tres valores que aparecen al final. Los usaras en el siguiente paso.
+
+#### Paso 4: Guardar las credenciales en GitHub
+
+GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipelines. Se guardan como secrets dentro de cada "environment" (dev, qa, prod).
+
+1. Ve a tu repositorio en GitHub
+2. Click en **Settings** (arriba a la derecha)
+3. En el menu izquierdo, click en **Environments**
+4. Crea tres environments: `dev`, `qa`, `prod`
+   - Para `prod`: activa **Required reviewers** y agrega tu usuario — esto hace que los deploys a produccion requieran aprobacion manual
+5. Entra a cada environment y agrega estos secrets:
+
+| Secret | De donde viene |
 |---|---|
-| `dev` | Sin restricciones |
-| `qa` | Opcional: restringir a ramas `release/*` |
-| `prod` | **Required reviewers** (aprobacion manual obligatoria) |
+| `AZURE_CLIENT_ID` | El valor `AZURE_CLIENT_ID` del paso anterior |
+| `AZURE_TENANT_ID` | El valor `AZURE_TENANT_ID` del paso anterior |
+| `AZURE_SUBSCRIPTION_ID` | El valor `AZURE_SUBSCRIPTION_ID` del paso anterior |
+| `ACR_LOGIN_SERVER` | Lo obtendras despues del paso 5 (ej: `acrotelcoldev.azurecr.io`) |
+| `OTLP_EXPORT_ENDPOINT` | URL de tu backend OTLP (ej: `https://otlp.tubackend.com:4317`) |
+| `TLS_CLIENT_CERT` | Ver seccion "Certificados TLS" mas abajo |
+| `TLS_CLIENT_KEY` | Ver seccion "Certificados TLS" mas abajo |
+| `TLS_CA_CERT` | Ver seccion "Certificados TLS" mas abajo |
 
-En cada environment, configura estos **secrets**:
+> Por ahora agrega los primeros tres (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 5.
 
-| Secret | Descripcion | Ejemplo |
-|---|---|---|
-| `AZURE_CLIENT_ID` | App ID de la App Registration | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `AZURE_TENANT_ID` | Tenant ID de Azure AD | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `AZURE_SUBSCRIPTION_ID` | ID de la suscripcion Azure | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
-| `ACR_LOGIN_SERVER` | Login server del ACR del ambiente | `acrotelcoldev.azurecr.io` |
-| `OTLP_EXPORT_ENDPOINT` | Endpoint OTLP destino | `https://otlp.example.com:4317` |
-| `TLS_CLIENT_CERT` | Certificado TLS del cliente (base64) | Contenido de `client.crt` en base64 |
-| `TLS_CLIENT_KEY` | Clave privada TLS del cliente (base64) | Contenido de `client.key` en base64 |
-| `TLS_CA_CERT` | Certificado CA para verificacion TLS (base64) | Contenido de `ca.crt` en base64 |
+#### Paso 5: Crear la infraestructura en Azure
 
-> Para obtener `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`, puedes ejecutar el workflow **"Setup Azure OIDC"** (ver paso 3).
+Con las credenciales ya configuradas en GitHub, el workflow `bootstrap.yml` crea todos los recursos de Azure automaticamente (sin que necesites hacer nada en el portal de Azure ni instalar Terraform).
 
-### Paso 3: Configurar Azure AD (OIDC) desde GitHub Actions
-
-El workflow `setup-azure-oidc.yml` crea automaticamente la App Registration con federated credentials. **No necesitas Azure CLI local.**
-
-1. Ve a **Actions > Setup Azure OIDC** en tu repositorio
-2. Click en **Run workflow**
-3. Ingresa tu repositorio en formato `owner/repo` (ej: `miguelsff/opentelemetry-custom-collector`)
-4. Click en **Run workflow**
-
-El workflow creara:
-- App Registration en Azure AD
-- Service Principal con rol Contributor
-- Federated credentials para las ramas `develop`, `release/*` y `main`
-
-Al finalizar, revisa los logs del workflow para obtener los valores de `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID` que debes configurar como secrets en el paso 2.
-
-> **Nota:** Para la primera ejecucion necesitas tener al menos un secret `AZURE_CLIENT_ID` temporal con permisos de Azure AD admin. Despues puedes reemplazarlo con el valor generado.
-
-### Paso 4: Crear la infraestructura desde GitHub Actions
-
-El workflow `bootstrap.yml` crea toda la infraestructura de Azure sin necesidad de herramientas locales:
-
-1. Ve a **Actions > Bootstrap Infrastructure** en tu repositorio
-2. Click en **Run workflow**
-3. Selecciona:
+1. Ve a tu repositorio en GitHub
+2. Click en **Actions**
+3. En el menu izquierdo busca **Bootstrap Infrastructure**
+4. Click en **Run workflow** (boton azul a la derecha)
+5. Selecciona:
    - **action**: `apply`
-   - **environment**: `all` (o un ambiente especifico)
-4. Click en **Run workflow**
+   - **environment**: `all`
+6. Click en **Run workflow**
 
-Esto crea automaticamente para cada ambiente:
-- Storage Account para Terraform state (solo la primera vez)
-- Resource Group
-- Azure Container Registry (ACR)
-- Log Analytics Workspace
-- Container Apps Environment
-- Container App con health probes y managed identity
+Espera a que termine (tarda 5-10 minutos). Esto crea en Azure:
+- Storage Account para guardar el estado de Terraform
+- Resource Group por ambiente
+- Azure Container Registry (ACR) — aqui se guardaran las imagenes Docker
+- Log Analytics Workspace — para ver los logs de la aplicacion
+- Container Apps Environment y Container App — donde corre el collector
 
-Para destruir la infraestructura, ejecuta el mismo workflow con action `destroy`.
+Al terminar, busca en los logs el valor de `ACR_LOGIN_SERVER` para cada ambiente y agregalo como secret en el paso 4.
 
-### Paso 5: Crear la rama develop
+> Para encontrarlo: en el Portal de Azure busca "Container registries", entra al ACR del ambiente y copia el valor de **Login server**.
+
+#### Paso 6: Crear la rama develop
 
 ```bash
 git checkout -b develop
 git push -u origin develop
 ```
+
+> Esta rama es obligatoria: es el punto de entrada para el pipeline de dev.
 
 ### Paso 6: Flujo GitFlow
 
@@ -377,9 +448,43 @@ Los recursos de cada ambiente se configuran en `terraform/environments/`:
 | Replicas max | 1 | 2 | 5 |
 | ACR SKU | Basic | Basic | Standard |
 
+### Certificados TLS
+
+El collector se comunica con el backend OTLP usando mTLS (mutual TLS): ambos lados se autentican con certificados. Necesitas tres archivos:
+
+| Archivo | Para que sirve |
+|---|---|
+| `client.crt` | Identifica al collector ante el backend |
+| `client.key` | Clave privada del certificado del collector |
+| `ca.crt` | Autoridad de certificacion que firmó los certificados |
+
+Tu proveedor de backend OTLP (Grafana Cloud, Datadog, etc.) te da estos archivos. Si estas en un entorno de prueba, puedes generar certificados autofirmados:
+
+```bash
+# Solo para pruebas locales - NO usar en produccion
+openssl req -x509 -newkey rsa:4096 -keyout client.key -out client.crt -days 365 -nodes -subj "/CN=otelcol-client"
+cp client.crt ca.crt  # En pruebas el cliente es su propia CA
+```
+
+Una vez que tienes los tres archivos, conviertelos a base64 para guardarlos como secrets en GitHub:
+
+```bash
+# En Linux/Mac
+base64 -w 0 client.crt   # copia el resultado como TLS_CLIENT_CERT
+base64 -w 0 client.key   # copia el resultado como TLS_CLIENT_KEY
+base64 -w 0 ca.crt       # copia el resultado como TLS_CA_CERT
+
+# En Windows (PowerShell)
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("client.crt"))
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("client.key"))
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("ca.crt"))
+```
+
+Terraform monta automaticamente esos valores como archivos dentro del Container App en `/certs/`.
+
 ### Configuracion del collector por ambiente
 
-Los archivos `collector-configs/{dev,qa,prod}.yaml` usan variables de entorno como placeholders:
+Los archivos `collector-configs/{dev,qa,prod}.yaml` leen la configuracion desde variables de entorno que Terraform inyecta en el Container App:
 
 ```yaml
 exporters:
@@ -389,16 +494,6 @@ exporters:
       cert_file: /certs/client.crt
       key_file: /certs/client.key
       ca_file: /certs/ca.crt
-```
-
-Los certificados mTLS se montan como volumen de secrets en el Container App via Terraform. Los valores se configuran como secrets base64 en los GitHub Environments.
-
-Para generar los valores base64 de los certificados:
-
-```bash
-base64 -w 0 client.crt  # -> usar como TLS_CLIENT_CERT
-base64 -w 0 client.key  # -> usar como TLS_CLIENT_KEY
-base64 -w 0 ca.crt      # -> usar como TLS_CA_CERT
 ```
 
 ### Estructura del despliegue
