@@ -1,0 +1,9 @@
+environment         = "prod"
+location            = "eastus2"
+resource_group_name = "rg-otelcol-prod"
+acr_sku             = "Standard"
+cpu                 = 1.0
+memory              = "2Gi"
+min_replicas        = 2
+max_replicas        = 5
+debug_verbosity     = "basic"

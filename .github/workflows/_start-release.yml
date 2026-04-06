@@ -1,0 +1,47 @@
+name: "Stage: Start Release"
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: "Release branch name (e.g., release/1.2.0)"
+        required: true
+        type: string
+      short-sha:
+        description: "Short commit SHA"
+        required: true
+        type: string
+    outputs:
+      rc-tag:
+        description: "Release candidate tag created"
+        value: ${{ jobs.start-release.outputs.rc-tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  start-release:
+    name: Start Release
+    runs-on: ubuntu-latest
+    outputs:
+      rc-tag: ${{ steps.tag.outputs.rc-tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from branch
+        id: version
+        run: |
+          VERSION="${{ inputs.branch }}"
+          VERSION="${VERSION#release/}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create RC tag
+        id: tag
+        run: |
+          RC_TAG="RC-${{ steps.version.outputs.version }}-${{ inputs.short-sha }}"
+          echo "rc-tag=${RC_TAG}" >> "$GITHUB_OUTPUT"
+          git tag "${RC_TAG}"
+          git push origin "${RC_TAG}"
+          echo "Created release candidate tag: ${RC_TAG}"

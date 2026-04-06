@@ -1,0 +1,50 @@
+name: "Docker Build & Test"
+description: "Build Docker image and run health check test"
+
+outputs:
+  test-result:
+    description: "Test result (pass/fail)"
+    value: ${{ steps.test.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: false
+        load: true
+        tags: otelcol-custom:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run health check test
+      id: test
+      shell: bash
+      run: |
+        docker run -d --name test-collector -p 13133:13133 otelcol-custom:test
+        echo "Waiting for collector to start..."
+        RESULT="fail"
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:13133/ > /dev/null 2>&1; then
+            echo "Health check passed"
+            RESULT="pass"
+            break
+          fi
+          sleep 1
+        done
+        echo "result=${RESULT}" >> "$GITHUB_OUTPUT"
+        if [ "$RESULT" = "fail" ]; then
+          echo "Health check failed"
+          docker logs test-collector
+          exit 1
+        fi
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: docker rm -f test-collector 2>/dev/null || true

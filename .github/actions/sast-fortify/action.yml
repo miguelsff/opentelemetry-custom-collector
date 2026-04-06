@@ -1,0 +1,55 @@
+name: "SAST Analysis (Fortify)"
+description: "[MOCKUP] Static Application Security Testing via Fortify. Replace with real Fortify integration."
+
+inputs:
+  source-path:
+    description: "Path to source code to scan"
+    required: false
+    default: "."
+
+outputs:
+  scan-result:
+    description: "Scan result (pass/fail)"
+    value: ${{ steps.scan.outputs.result }}
+  report-path:
+    description: "Path to scan report"
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "[MOCKUP] SAST - Fortify Scan"
+      id: scan
+      shell: bash
+      run: |
+        echo "============================================"
+        echo "  MOCKUP: Fortify SAST Analysis"
+        echo "============================================"
+        echo ""
+        echo "In production, this step will:"
+        echo "  1. Download Fortify SCA client"
+        echo "  2. Translate source code"
+        echo "  3. Run static analysis scan"
+        echo "  4. Upload results to Fortify SSC"
+        echo "  5. Check against quality gate thresholds"
+        echo ""
+        echo "Source path: ${{ inputs.source-path }}"
+        echo ""
+        echo "Result: PASS (mockup - no real scan performed)"
+        echo "============================================"
+        echo "result=pass" >> "$GITHUB_OUTPUT"
+        echo "report-path=sast-report-mockup.json" >> "$GITHUB_OUTPUT"
+
+    - name: "[MOCKUP] Generate SAST report"
+      shell: bash
+      run: |
+        cat > sast-report-mockup.json << 'EOF'
+        {
+          "tool": "fortify",
+          "status": "mockup",
+          "timestamp": "${{ github.event.head_commit.timestamp }}",
+          "commit": "${{ github.sha }}",
+          "vulnerabilities": { "critical": 0, "high": 0, "medium": 0, "low": 0 },
+          "note": "Replace this mockup with real Fortify integration from DevSecOps shared library"
+        }
+        EOF

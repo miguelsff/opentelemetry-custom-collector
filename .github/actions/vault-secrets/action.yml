@@ -1,0 +1,51 @@
+name: "Fetch Secrets from Vault"
+description: "[MOCKUP] Retrieve secrets from HashiCorp Vault. Replace with real Vault integration."
+
+inputs:
+  vault-url:
+    description: "Vault server URL"
+    required: false
+    default: "https://vault.example.com"
+  vault-role:
+    description: "Vault role for JWT/OIDC authentication"
+    required: false
+    default: "github-actions"
+  secret-path:
+    description: "Vault secret path"
+    required: false
+    default: "secret/data/otelcol"
+  environment:
+    description: "Environment (dev/qa/prod)"
+    required: true
+
+outputs:
+  note:
+    description: "Mockup notice"
+    value: ${{ steps.fetch.outputs.note }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "[MOCKUP] Fetch secrets from Vault"
+      id: fetch
+      shell: bash
+      run: |
+        echo "============================================"
+        echo "  MOCKUP: HashiCorp Vault Secret Retrieval"
+        echo "============================================"
+        echo ""
+        echo "In production, this step will:"
+        echo "  1. Authenticate to Vault via JWT/OIDC (GitHub Actions token)"
+        echo "  2. Read secrets from: ${{ inputs.secret-path }}/${{ inputs.environment }}"
+        echo "  3. Export secrets as masked environment variables"
+        echo ""
+        echo "Secrets that would be fetched:"
+        echo "  - OTLP_EXPORT_ENDPOINT"
+        echo "  - TLS_CLIENT_CERT"
+        echo "  - TLS_CLIENT_KEY"
+        echo "  - TLS_CA_CERT"
+        echo "  - ACR_LOGIN_SERVER"
+        echo ""
+        echo "Currently using: GitHub Environment Secrets (fallback)"
+        echo "============================================"
+        echo "note=MOCKUP - using GitHub Secrets as fallback" >> "$GITHUB_OUTPUT"

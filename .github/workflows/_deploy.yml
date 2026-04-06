@@ -1,0 +1,61 @@
+name: "Stage: Deploy"
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (dev/qa/prod)"
+        required: true
+        type: string
+      image-tag:
+        description: "Docker image tag to deploy"
+        required: true
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      OTLP_EXPORT_ENDPOINT:
+        required: true
+      TLS_CLIENT_CERT:
+        required: true
+      TLS_CLIENT_KEY:
+        required: true
+      TLS_CA_CERT:
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/vault-secrets
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: ./.github/actions/terraform-deploy
+        with:
+          environment: ${{ inputs.environment }}
+          image-tag: ${{ inputs.image-tag }}
+          tf-state-key: ${{ inputs.environment }}.tfstate
+          otlp-export-endpoint: ${{ secrets.OTLP_EXPORT_ENDPOINT }}
+          tls-client-cert: ${{ secrets.TLS_CLIENT_CERT }}
+          tls-client-key: ${{ secrets.TLS_CLIENT_KEY }}
+          tls-ca-cert: ${{ secrets.TLS_CA_CERT }}

@@ -1,0 +1,71 @@
+name: "Stage: Promote Release"
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (prod)"
+        required: true
+        type: string
+      short-sha:
+        description: "Short commit SHA"
+        required: true
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      ACR_LOGIN_SERVER:
+        required: true
+    outputs:
+      prod-image-tag:
+        description: "Production image tag"
+        value: ${{ jobs.promote.outputs.prod-image-tag }}
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  promote:
+    name: Promote Release
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      prod-image-tag: ${{ steps.promote.outputs.prod-tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Promote image (retag qa -> prod)
+        id: promote
+        run: |
+          ACR_NAME=$(echo "${{ secrets.ACR_LOGIN_SERVER }}" | cut -d'.' -f1)
+          az acr login --name "${ACR_NAME}"
+
+          PROD_TAG="prod-${{ inputs.short-sha }}"
+
+          docker pull "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:qa-latest"
+          docker tag "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:qa-latest" \
+                     "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:${PROD_TAG}"
+          docker tag "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:qa-latest" \
+                     "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:prod-latest"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:${PROD_TAG}"
+          docker push "${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:prod-latest"
+
+          echo "prod-tag=${PROD_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Promoted qa-latest -> ${PROD_TAG}, prod-latest"
+
+      - name: Create release tag
+        run: |
+          git tag "v-${{ inputs.short-sha }}"
+          git push origin "v-${{ inputs.short-sha }}"

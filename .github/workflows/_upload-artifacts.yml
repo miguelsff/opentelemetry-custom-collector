@@ -1,0 +1,85 @@
+name: "Stage: Upload Artifacts"
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (dev/qa/prod)"
+        required: true
+        type: string
+      image-tag:
+        description: "Docker image tag"
+        required: true
+        type: string
+      commit-sha:
+        description: "Full commit SHA for OCI labels"
+        required: false
+        type: string
+      branch:
+        description: "Branch name for OCI labels"
+        required: false
+        type: string
+      author:
+        description: "Commit author for OCI labels"
+        required: false
+        type: string
+      timestamp:
+        description: "Build timestamp for OCI labels"
+        required: false
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+      ACR_LOGIN_SERVER:
+        required: true
+    outputs:
+      image-tag:
+        description: "Image tag that was pushed"
+        value: ${{ jobs.upload.outputs.image-tag }}
+      image-reference:
+        description: "Full image reference (registry/repo:tag)"
+        value: ${{ jobs.upload.outputs.image-reference }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upload:
+    name: Push to ACR
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      image-tag: ${{ inputs.image-tag }}
+      image-reference: ${{ steps.ref.outputs.image-reference }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/vault-secrets
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: ./.github/actions/docker-build-push
+        with:
+          acr-login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          image-tag: ${{ inputs.image-tag }}
+          environment: ${{ inputs.environment }}
+          commit-sha: ${{ inputs.commit-sha }}
+          branch: ${{ inputs.branch }}
+          author: ${{ inputs.author }}
+          timestamp: ${{ inputs.timestamp }}
+
+      - name: Set image reference
+        id: ref
+        run: echo "image-reference=${{ secrets.ACR_LOGIN_SERVER }}/otelcol-custom:${{ inputs.image-tag }}" >> "$GITHUB_OUTPUT"

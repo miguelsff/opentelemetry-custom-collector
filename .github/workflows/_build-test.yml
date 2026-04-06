@@ -1,0 +1,38 @@
+name: "Stage: Build & Unit Test"
+
+on:
+  workflow_call:
+    outputs:
+      test-result:
+        description: "Health check test result (pass/fail)"
+        value: ${{ jobs.build-test.outputs.test-result }}
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    outputs:
+      test-result: ${{ steps.build.outputs.test-result }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Format Check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - uses: ./.github/actions/docker-build-test
+        id: build

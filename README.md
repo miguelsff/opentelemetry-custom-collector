@@ -103,15 +103,18 @@ El catalogo completo de componentes esta en el [OpenTelemetry Registry](https://
 ## Estructura del proyecto
 
 ```
-.env.example           # Template de configuracion
-.env                   # Configuracion local (gitignored)
-builder-config.yaml    # Componentes a compilar en el binario (OCB manifest)
-collector-config.yaml  # Configuracion de runtime del collector
-Dockerfile             # Build multi-stage: certs -> Go build -> distroless
-docker-compose.yml     # Orquestacion con variables de .env
-install.sh             # Script de instalacion
-status.sh              # Script de estado
-stop.sh                # Script de parada
+.env.example              # Template de configuracion
+.env                      # Configuracion local (gitignored)
+builder-config.yaml       # Componentes a compilar en el binario (OCB manifest)
+collector-config.yaml     # Configuracion de runtime del collector (local)
+Dockerfile                # Build multi-stage: certs -> Go build -> distroless
+docker-compose.yml        # Orquestacion con variables de .env (local)
+install.sh                # Script de instalacion local
+status.sh                 # Script de estado local
+stop.sh                   # Script de parada local
+terraform/                # Infraestructura como codigo (Azure)
+collector-configs/        # Configuraciones del collector por ambiente
+.github/                  # CI/CD pipelines (GitHub Actions)
 ```
 
 ## Enviar datos de prueba
@@ -217,3 +220,231 @@ curl -X POST http://localhost:4318/v1/logs \
 Los datos recibidos apareceran en los logs del collector con detalle completo (`bash status.sh`).
 
 > **Tip:** Para enviar datos via gRPC (puerto 4317), usa cualquier SDK de OpenTelemetry apuntando a `localhost:4317`.
+
+## Despliegue automatico en Azure
+
+El proyecto incluye Terraform y GitHub Actions para desplegar automaticamente en **Azure Container Apps** con tres ambientes: dev, qa y prod, usando GitFlow.
+
+### Arquitectura
+
+```
+feature/* ──► develop ──► release/* ──► main
+                │              │           │
+              CI+CD          CI+CD       CI+CD
+                │              │           │
+              ┌─▼─┐        ┌──▼──┐     ┌──▼──┐
+              │DEV│        │ QA  │     │PROD │ (approval)
+              └───┘        └─────┘     └─────┘
+```
+
+Cada ambiente tiene su propio ACR, Container App y Log Analytics Workspace.
+
+### Paso 1: Prerequisitos
+
+- Repositorio en GitHub con permisos de administrador
+- Una suscripcion de Azure activa
+
+> **No se necesita instalar Terraform ni Azure CLI localmente.** Todo se ejecuta desde GitHub Actions.
+
+### Paso 2: Configurar GitHub Environments y Secrets
+
+En tu repositorio de GitHub, ve a **Settings > Environments** y crea tres environments:
+
+| Environment | Proteccion |
+|---|---|
+| `dev` | Sin restricciones |
+| `qa` | Opcional: restringir a ramas `release/*` |
+| `prod` | **Required reviewers** (aprobacion manual obligatoria) |
+
+En cada environment, configura estos **secrets**:
+
+| Secret | Descripcion | Ejemplo |
+|---|---|---|
+| `AZURE_CLIENT_ID` | App ID de la App Registration | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `AZURE_TENANT_ID` | Tenant ID de Azure AD | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `AZURE_SUBSCRIPTION_ID` | ID de la suscripcion Azure | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `ACR_LOGIN_SERVER` | Login server del ACR del ambiente | `acrotelcoldev.azurecr.io` |
+| `OTLP_EXPORT_ENDPOINT` | Endpoint OTLP destino | `https://otlp.example.com:4317` |
+| `TLS_CLIENT_CERT` | Certificado TLS del cliente (base64) | Contenido de `client.crt` en base64 |
+| `TLS_CLIENT_KEY` | Clave privada TLS del cliente (base64) | Contenido de `client.key` en base64 |
+| `TLS_CA_CERT` | Certificado CA para verificacion TLS (base64) | Contenido de `ca.crt` en base64 |
+
+> Para obtener `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID`, puedes ejecutar el workflow **"Setup Azure OIDC"** (ver paso 3).
+
+### Paso 3: Configurar Azure AD (OIDC) desde GitHub Actions
+
+El workflow `setup-azure-oidc.yml` crea automaticamente la App Registration con federated credentials. **No necesitas Azure CLI local.**
+
+1. Ve a **Actions > Setup Azure OIDC** en tu repositorio
+2. Click en **Run workflow**
+3. Ingresa tu repositorio en formato `owner/repo` (ej: `miguelsff/opentelemetry-custom-collector`)
+4. Click en **Run workflow**
+
+El workflow creara:
+- App Registration en Azure AD
+- Service Principal con rol Contributor
+- Federated credentials para las ramas `develop`, `release/*` y `main`
+
+Al finalizar, revisa los logs del workflow para obtener los valores de `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` y `AZURE_SUBSCRIPTION_ID` que debes configurar como secrets en el paso 2.
+
+> **Nota:** Para la primera ejecucion necesitas tener al menos un secret `AZURE_CLIENT_ID` temporal con permisos de Azure AD admin. Despues puedes reemplazarlo con el valor generado.
+
+### Paso 4: Crear la infraestructura desde GitHub Actions
+
+El workflow `bootstrap.yml` crea toda la infraestructura de Azure sin necesidad de herramientas locales:
+
+1. Ve a **Actions > Bootstrap Infrastructure** en tu repositorio
+2. Click en **Run workflow**
+3. Selecciona:
+   - **action**: `apply`
+   - **environment**: `all` (o un ambiente especifico)
+4. Click en **Run workflow**
+
+Esto crea automaticamente para cada ambiente:
+- Storage Account para Terraform state (solo la primera vez)
+- Resource Group
+- Azure Container Registry (ACR)
+- Log Analytics Workspace
+- Container Apps Environment
+- Container App con health probes y managed identity
+
+Para destruir la infraestructura, ejecuta el mismo workflow con action `destroy`.
+
+### Paso 5: Crear la rama develop
+
+```bash
+git checkout -b develop
+git push -u origin develop
+```
+
+### Paso 6: Flujo GitFlow
+
+#### Desarrollo (feature -> dev)
+
+```bash
+# Crear feature branch
+git checkout develop
+git checkout -b feature/mi-cambio
+
+# ... hacer cambios, commits ...
+
+# Merge a develop (dispara deploy a dev)
+git checkout develop
+git merge feature/mi-cambio
+git push origin develop
+```
+
+El push a `develop` ejecuta automaticamente el pipeline `CI/CD: Dev`:
+1. **Preparation** - Metadata y trazabilidad
+2. **Build & Test** - Lint (Hadolint + Terraform fmt) + Docker build + health check
+3. **SAST Analysis** - Escaneo de seguridad estatico (Fortify)
+4. **QA Analysis** - Calidad de codigo (SonarQube)
+5. **Upload Artifacts** - Build y push a ACR
+6. **SCA Analysis** - Analisis de dependencias (JFrog Xray)
+7. **Deploy** - `terraform apply` con `dev.tfvars`
+
+#### QA (release -> qa)
+
+```bash
+# Crear release branch desde develop
+git checkout develop
+git checkout -b release/1.0.0
+git push -u origin release/1.0.0
+```
+
+El push a `release/*` ejecuta el pipeline `CI/CD: Cert (QA)`, que ademas crea un tag de release candidate (RC-) antes de los stages CI/CD.
+
+#### Produccion (main -> prod)
+
+```bash
+# Merge release a main
+git checkout main
+git merge release/1.0.0
+git push origin main
+```
+
+El push a `main` ejecuta el pipeline `CI/CD: Prod`, que **promueve la imagen de QA** (retag, sin rebuild) y despliega a produccion. Requiere **aprobacion manual** via GitHub Environment protection rules.
+
+### Configuracion por ambiente
+
+Los recursos de cada ambiente se configuran en `terraform/environments/`:
+
+| Recurso | dev | qa | prod |
+|---|---|---|---|
+| CPU | 0.25 cores | 0.5 cores | 1.0 cores |
+| Memoria | 0.5 Gi | 1 Gi | 2 Gi |
+| Replicas min | 0 | 1 | 2 |
+| Replicas max | 1 | 2 | 5 |
+| ACR SKU | Basic | Basic | Standard |
+
+### Configuracion del collector por ambiente
+
+Los archivos `collector-configs/{dev,qa,prod}.yaml` usan variables de entorno como placeholders:
+
+```yaml
+exporters:
+  otlp:
+    endpoint: ${env:OTLP_EXPORT_ENDPOINT}
+    tls:
+      cert_file: /certs/client.crt
+      key_file: /certs/client.key
+      ca_file: /certs/ca.crt
+```
+
+Los certificados mTLS se montan como volumen de secrets en el Container App via Terraform. Los valores se configuran como secrets base64 en los GitHub Environments.
+
+Para generar los valores base64 de los certificados:
+
+```bash
+base64 -w 0 client.crt  # -> usar como TLS_CLIENT_CERT
+base64 -w 0 client.key  # -> usar como TLS_CLIENT_KEY
+base64 -w 0 ca.crt      # -> usar como TLS_CA_CERT
+```
+
+### Estructura del despliegue
+
+```
+terraform/
+  bootstrap/             # Setup unico: storage para TF state
+  modules/
+    acr/                 # Azure Container Registry por ambiente
+    monitoring/          # Log Analytics Workspace
+    container-app/       # Container App + Identity + Health probes
+  environments/
+    dev.tfvars           # Sizing para dev
+    qa.tfvars            # Sizing para qa
+    prod.tfvars          # Sizing para prod
+.github/
+  actions/                          # Composite actions por stage
+    prepare/                        # Checkout + metadata trazabilidad
+    docker-build-test/              # Build image + health check test
+    docker-build-push/              # Build + push a ACR (con OCI labels)
+    sast-fortify/                   # SAST scan (Fortify placeholder)
+    qa-sonarqube/                   # QA analysis (SonarQube placeholder)
+    sca-xray/                       # SCA scan (JFrog Xray placeholder)
+    terraform-deploy/               # Terraform init + plan + apply
+    vault-secrets/                  # Secret retrieval (Vault placeholder)
+  workflows/
+    # Reusable workflows (llamados via workflow_call)
+    _prepare.yml                    # Stage: Preparation
+    _build-test.yml                 # Stage: Build & Unit Test
+    _sast-analysis.yml              # Stage: SAST Analysis
+    _qa-analysis.yml                # Stage: QA Analysis
+    _upload-artifacts.yml           # Stage: Upload Artifacts (push a ACR)
+    _sca-analysis.yml               # Stage: SCA Analysis
+    _deploy.yml                     # Stage: Deploy (Terraform)
+    _start-release.yml              # Stage: Start Release (RC tag)
+    _promote-release.yml            # Stage: Promote Release (retag qa->prod)
+    # Dispatchers (orquestadores con triggers)
+    ci-docker-pr.yml                # PR validation (CI stages only)
+    ci-cd-docker-dev.yml            # develop -> dev (CI + CD)
+    ci-cd-docker-cert.yml           # release/* -> qa (CI + CD)
+    ci-cd-docker-prod.yml           # main -> prod (promote + CD)
+    # Setup (manuales, una vez)
+    setup-azure-oidc.yml            # Configura Azure AD + OIDC
+    bootstrap.yml                   # Crea/destruye infra completa
+collector-configs/
+  dev.yaml               # Config con env vars para dev
+  qa.yaml                # Config con env vars para qa
+  prod.yaml              # Config con env vars para prod
+```

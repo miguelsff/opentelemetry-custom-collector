@@ -1,0 +1,50 @@
+name: "Prepare"
+description: "Checkout code and generate traceability metadata"
+
+inputs:
+  fetch-depth:
+    description: "Git fetch depth (0 for full history)"
+    required: false
+    default: "1"
+
+outputs:
+  commit-sha:
+    description: "Full commit SHA"
+    value: ${{ steps.meta.outputs.commit-sha }}
+  short-sha:
+    description: "Short commit SHA (7 chars)"
+    value: ${{ steps.meta.outputs.short-sha }}
+  branch:
+    description: "Branch name"
+    value: ${{ steps.meta.outputs.branch }}
+  author:
+    description: "Commit author"
+    value: ${{ steps.meta.outputs.author }}
+  timestamp:
+    description: "Build timestamp ISO 8601"
+    value: ${{ steps.meta.outputs.timestamp }}
+  project:
+    description: "Project name (owner/repo)"
+    value: ${{ steps.meta.outputs.project }}
+  application:
+    description: "Application name"
+    value: ${{ steps.meta.outputs.application }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+
+    - name: Generate traceability metadata
+      id: meta
+      shell: bash
+      run: |
+        echo "commit-sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+        echo "short-sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        echo "author=$(git log -1 --format='%an')" >> "$GITHUB_OUTPUT"
+        echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+        echo "project=${GITHUB_REPOSITORY}" >> "$GITHUB_OUTPUT"
+        echo "application=otelcol-custom" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,24 @@
+name: "Stage: SAST Analysis"
+
+on:
+  workflow_call:
+    outputs:
+      scan-result:
+        description: "SAST scan result (pass/fail)"
+        value: ${{ jobs.sast.outputs.scan-result }}
+
+jobs:
+  sast:
+    name: SAST Analysis (Fortify)
+    runs-on: ubuntu-latest
+    outputs:
+      scan-result: ${{ steps.scan.outputs.scan-result }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sast-fortify
+        id: scan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sast-report
+          path: sast-report-mockup.json
+          retention-days: 30

@@ -1,0 +1,55 @@
+name: "QA Analysis (SonarQube)"
+description: "[MOCKUP] Code quality analysis via SonarQube. Replace with real SonarQube integration."
+
+inputs:
+  source-path:
+    description: "Path to source code to scan"
+    required: false
+    default: "."
+
+outputs:
+  quality-gate-status:
+    description: "Quality gate result (pass/fail)"
+    value: ${{ steps.scan.outputs.quality-gate-status }}
+  report-path:
+    description: "Path to scan report"
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "[MOCKUP] QA - SonarQube Analysis"
+      id: scan
+      shell: bash
+      run: |
+        echo "============================================"
+        echo "  MOCKUP: SonarQube QA Analysis"
+        echo "============================================"
+        echo ""
+        echo "In production, this step will:"
+        echo "  1. Run SonarQube Scanner"
+        echo "  2. Analyze code quality (bugs, code smells, duplications)"
+        echo "  3. Measure code coverage"
+        echo "  4. Check quality gate status"
+        echo ""
+        echo "Source path: ${{ inputs.source-path }}"
+        echo ""
+        echo "Result: PASS (mockup - no real scan performed)"
+        echo "============================================"
+        echo "quality-gate-status=pass" >> "$GITHUB_OUTPUT"
+        echo "report-path=qa-report-mockup.json" >> "$GITHUB_OUTPUT"
+
+    - name: "[MOCKUP] Generate QA report"
+      shell: bash
+      run: |
+        cat > qa-report-mockup.json << 'EOF'
+        {
+          "tool": "sonarqube",
+          "status": "mockup",
+          "timestamp": "${{ github.event.head_commit.timestamp }}",
+          "commit": "${{ github.sha }}",
+          "quality_gate": "PASSED",
+          "metrics": { "bugs": 0, "code_smells": 0, "coverage": "N/A", "duplications": "0%" },
+          "note": "Replace this mockup with real SonarQube integration from DevSecOps shared library"
+        }
+        EOF

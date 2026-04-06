@@ -1,0 +1,43 @@
+name: "Stage: Prepare"
+
+on:
+  workflow_call:
+    outputs:
+      commit-sha:
+        description: "Full commit SHA"
+        value: ${{ jobs.prepare.outputs.commit-sha }}
+      short-sha:
+        description: "Short commit SHA (7 chars)"
+        value: ${{ jobs.prepare.outputs.short-sha }}
+      branch:
+        description: "Branch name"
+        value: ${{ jobs.prepare.outputs.branch }}
+      author:
+        description: "Commit author"
+        value: ${{ jobs.prepare.outputs.author }}
+      timestamp:
+        description: "Build timestamp ISO 8601"
+        value: ${{ jobs.prepare.outputs.timestamp }}
+      project:
+        description: "Project name (owner/repo)"
+        value: ${{ jobs.prepare.outputs.project }}
+      application:
+        description: "Application name"
+        value: ${{ jobs.prepare.outputs.application }}
+
+jobs:
+  prepare:
+    name: Preparation
+    runs-on: ubuntu-latest
+    outputs:
+      commit-sha: ${{ steps.prep.outputs.commit-sha }}
+      short-sha: ${{ steps.prep.outputs.short-sha }}
+      branch: ${{ steps.prep.outputs.branch }}
+      author: ${{ steps.prep.outputs.author }}
+      timestamp: ${{ steps.prep.outputs.timestamp }}
+      project: ${{ steps.prep.outputs.project }}
+      application: ${{ steps.prep.outputs.application }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/prepare
+        id: prep

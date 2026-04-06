@@ -1,0 +1,31 @@
+name: "Stage: SCA Analysis"
+
+on:
+  workflow_call:
+    inputs:
+      image-reference:
+        description: "Container image reference to scan"
+        required: true
+        type: string
+    outputs:
+      scan-result:
+        description: "SCA scan result (pass/fail)"
+        value: ${{ jobs.sca.outputs.scan-result }}
+
+jobs:
+  sca:
+    name: SCA Analysis (JFrog Xray)
+    runs-on: ubuntu-latest
+    outputs:
+      scan-result: ${{ steps.scan.outputs.scan-result }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/sca-xray
+        id: scan
+        with:
+          image-reference: ${{ inputs.image-reference }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sca-report
+          path: sca-report-mockup.json
+          retention-days: 30

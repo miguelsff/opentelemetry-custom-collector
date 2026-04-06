@@ -1,0 +1,223 @@
+name: Bootstrap Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action to execute"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      environment:
+        description: "Environment to bootstrap (or 'all' for all environments)"
+        required: true
+        type: choice
+        options:
+          - all
+          - dev
+          - qa
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bootstrap-state:
+    name: Bootstrap TF State Storage
+    runs-on: ubuntu-latest
+    if: inputs.action == 'apply'
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check if state storage already exists
+        id: check
+        run: |
+          if az storage account show --name stotelcoltfstate --resource-group rg-otelcol-tfstate &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "State storage already exists, skipping bootstrap."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "State storage not found, will create."
+          fi
+
+      - name: Setup Terraform
+        if: steps.check.outputs.exists == 'false'
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init (bootstrap)
+        if: steps.check.outputs.exists == 'false'
+        working-directory: terraform/bootstrap
+        run: terraform init
+
+      - name: Terraform Apply (bootstrap)
+        if: steps.check.outputs.exists == 'false'
+        working-directory: terraform/bootstrap
+        run: terraform apply -auto-approve
+
+  infra-dev:
+    name: "Infra: dev"
+    runs-on: ubuntu-latest
+    if: inputs.environment == 'all' || inputs.environment == 'dev'
+    needs: [bootstrap-state]
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -backend-config="key=dev.tfstate"
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file=environments/dev.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: terraform
+        run: terraform apply tfplan
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        working-directory: terraform
+        run: |
+          terraform destroy -auto-approve \
+            -var-file=environments/dev.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}"
+
+  infra-qa:
+    name: "Infra: qa"
+    runs-on: ubuntu-latest
+    if: inputs.environment == 'all' || inputs.environment == 'qa'
+    needs: [bootstrap-state]
+    environment: qa
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -backend-config="key=qa.tfstate"
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file=environments/qa.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: terraform
+        run: terraform apply tfplan
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        working-directory: terraform
+        run: |
+          terraform destroy -auto-approve \
+            -var-file=environments/qa.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}"
+
+  infra-prod:
+    name: "Infra: prod"
+    runs-on: ubuntu-latest
+    if: inputs.environment == 'all' || inputs.environment == 'prod'
+    needs: [bootstrap-state]
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -backend-config="key=prod.tfstate"
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var-file=environments/prod.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: terraform
+        run: terraform apply tfplan
+
+      - name: Terraform Destroy
+        if: inputs.action == 'destroy'
+        working-directory: terraform
+        run: |
+          terraform destroy -auto-approve \
+            -var-file=environments/prod.tfvars \
+            -var="image_tag=init" \
+            -var="otlp_export_endpoint=${{ secrets.OTLP_EXPORT_ENDPOINT }}" \
+            -var="tls_client_cert=${{ secrets.TLS_CLIENT_CERT }}" \
+            -var="tls_client_key=${{ secrets.TLS_CLIENT_KEY }}" \
+            -var="tls_ca_cert=${{ secrets.TLS_CA_CERT }}"

@@ -1,0 +1,62 @@
+name: "Build and Push Docker Image"
+description: "Builds the OTel Collector image and pushes it to ACR"
+
+inputs:
+  acr-login-server:
+    description: "ACR login server (e.g., acrotelcoldev.azurecr.io)"
+    required: true
+  image-tag:
+    description: "Image tag (e.g., dev-abc1234)"
+    required: true
+  environment:
+    description: "Environment name (dev, qa, prod)"
+    required: true
+  commit-sha:
+    description: "Full commit SHA for OCI label"
+    required: false
+    default: ""
+  branch:
+    description: "Branch name for OCI label"
+    required: false
+    default: ""
+  author:
+    description: "Commit author for OCI label"
+    required: false
+    default: ""
+  timestamp:
+    description: "Build timestamp for OCI label"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to ACR
+      shell: bash
+      run: az acr login --name $(echo "${{ inputs.acr-login-server }}" | cut -d'.' -f1)
+
+    - name: Copy environment collector config
+      shell: bash
+      run: cp collector-configs/${{ inputs.environment }}.yaml collector-config.yaml
+
+    - name: Build and push
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ inputs.acr-login-server }}/otelcol-custom:${{ inputs.image-tag }}
+          ${{ inputs.acr-login-server }}/otelcol-custom:${{ inputs.environment }}-latest
+        labels: |
+          org.opencontainers.image.revision=${{ inputs.commit-sha }}
+          org.opencontainers.image.ref.name=${{ inputs.branch }}
+          org.opencontainers.image.authors=${{ inputs.author }}
+          org.opencontainers.image.created=${{ inputs.timestamp }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.title=otelcol-custom
+          org.opencontainers.image.description=Custom OpenTelemetry Collector distribution
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

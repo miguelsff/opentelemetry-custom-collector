@@ -1,0 +1,97 @@
+name: "CI/CD: Dev"
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # --- CI Stages ---
+
+  prepare:
+    uses: ./.github/workflows/_prepare.yml
+
+  build-test:
+    needs: [prepare]
+    uses: ./.github/workflows/_build-test.yml
+
+  sast:
+    needs: [build-test]
+    uses: ./.github/workflows/_sast-analysis.yml
+
+  qa:
+    needs: [build-test]
+    uses: ./.github/workflows/_qa-analysis.yml
+
+  upload:
+    needs: [prepare, sast, qa]
+    uses: ./.github/workflows/_upload-artifacts.yml
+    with:
+      environment: dev
+      image-tag: dev-${{ needs.prepare.outputs.short-sha }}
+      commit-sha: ${{ needs.prepare.outputs.commit-sha }}
+      branch: ${{ needs.prepare.outputs.branch }}
+      author: ${{ needs.prepare.outputs.author }}
+      timestamp: ${{ needs.prepare.outputs.timestamp }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+
+  sca:
+    needs: [upload]
+    uses: ./.github/workflows/_sca-analysis.yml
+    with:
+      image-reference: ${{ needs.upload.outputs.image-reference }}
+
+  # --- CD Stage ---
+
+  deploy:
+    needs: [prepare, sca]
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: dev
+      image-tag: dev-${{ needs.prepare.outputs.short-sha }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      OTLP_EXPORT_ENDPOINT: ${{ secrets.OTLP_EXPORT_ENDPOINT }}
+      TLS_CLIENT_CERT: ${{ secrets.TLS_CLIENT_CERT }}
+      TLS_CLIENT_KEY: ${{ secrets.TLS_CLIENT_KEY }}
+      TLS_CA_CERT: ${{ secrets.TLS_CA_CERT }}
+
+  # --- Traceability ---
+
+  summary:
+    if: always()
+    needs: [prepare, build-test, sast, qa, upload, sca, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pipeline Summary
+        run: |
+          echo "## Pipeline Traceability" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Project | ${{ needs.prepare.outputs.project }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Application | ${{ needs.prepare.outputs.application }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ needs.prepare.outputs.branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ needs.prepare.outputs.commit-sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Author | ${{ needs.prepare.outputs.author }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | ${{ needs.prepare.outputs.timestamp }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Stage Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Test | ${{ needs.build-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST Analysis | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| QA Analysis | ${{ needs.qa.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Upload Artifacts | ${{ needs.upload.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SCA Analysis | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deploy | ${{ needs.deploy.result }} |" >> $GITHUB_STEP_SUMMARY

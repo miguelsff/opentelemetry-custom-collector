@@ -1,0 +1,55 @@
+name: "SCA Analysis (JFrog Xray)"
+description: "[MOCKUP] Software Composition Analysis via JFrog Xray. Replace with real Xray integration."
+
+inputs:
+  image-reference:
+    description: "Container image reference to scan (e.g., acr.azurecr.io/app:tag)"
+    required: true
+
+outputs:
+  scan-result:
+    description: "Scan result (pass/fail)"
+    value: ${{ steps.scan.outputs.result }}
+  report-path:
+    description: "Path to scan report"
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: "[MOCKUP] SCA - JFrog Xray Scan"
+      id: scan
+      shell: bash
+      run: |
+        echo "============================================"
+        echo "  MOCKUP: JFrog Xray SCA Analysis"
+        echo "============================================"
+        echo ""
+        echo "In production, this step will:"
+        echo "  1. Connect to JFrog Xray"
+        echo "  2. Scan container image dependencies"
+        echo "  3. Check for known CVEs"
+        echo "  4. Validate license compliance"
+        echo ""
+        echo "Image: ${{ inputs.image-reference }}"
+        echo ""
+        echo "Result: PASS (mockup - no real scan performed)"
+        echo "============================================"
+        echo "result=pass" >> "$GITHUB_OUTPUT"
+        echo "report-path=sca-report-mockup.json" >> "$GITHUB_OUTPUT"
+
+    - name: "[MOCKUP] Generate SCA report"
+      shell: bash
+      run: |
+        cat > sca-report-mockup.json << 'EOF'
+        {
+          "tool": "jfrog-xray",
+          "status": "mockup",
+          "timestamp": "${{ github.event.head_commit.timestamp }}",
+          "commit": "${{ github.sha }}",
+          "image": "${{ inputs.image-reference }}",
+          "vulnerabilities": { "critical": 0, "high": 0, "medium": 0, "low": 0 },
+          "licenses": { "compliant": true },
+          "note": "Replace this mockup with real JFrog Xray integration from DevSecOps shared library"
+        }
+        EOF

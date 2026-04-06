@@ -1,0 +1,9 @@
+environment         = "qa"
+location            = "eastus2"
+resource_group_name = "rg-otelcol-qa"
+acr_sku             = "Basic"
+cpu                 = 0.5
+memory              = "1Gi"
+min_replicas        = 1
+max_replicas        = 2
+debug_verbosity     = "basic"

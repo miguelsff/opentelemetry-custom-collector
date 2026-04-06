@@ -1,0 +1,9 @@
+environment         = "dev"
+location            = "eastus2"
+resource_group_name = "rg-otelcol-dev"
+acr_sku             = "Basic"
+cpu                 = 0.25
+memory              = "0.5Gi"
+min_replicas        = 0
+max_replicas        = 1
+debug_verbosity     = "detailed"

@@ -1,0 +1,54 @@
+name: "Terraform Deploy"
+description: "Initialize, plan, and apply Terraform for a given environment"
+
+inputs:
+  environment:
+    description: "Target environment (dev/qa/prod)"
+    required: true
+  image-tag:
+    description: "Docker image tag to deploy"
+    required: true
+  tf-state-key:
+    description: "Terraform state file key (e.g., dev.tfstate)"
+    required: true
+  otlp-export-endpoint:
+    description: "OTLP exporter endpoint"
+    required: true
+  tls-client-cert:
+    description: "TLS client certificate (base64)"
+    required: true
+  tls-client-key:
+    description: "TLS client key (base64)"
+    required: true
+  tls-ca-cert:
+    description: "TLS CA certificate (base64)"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      working-directory: terraform
+      shell: bash
+      run: terraform init -backend-config="key=${{ inputs.tf-state-key }}"
+
+    - name: Terraform Plan
+      working-directory: terraform
+      shell: bash
+      run: |
+        terraform plan \
+          -var-file=environments/${{ inputs.environment }}.tfvars \
+          -var="image_tag=${{ inputs.image-tag }}" \
+          -var="otlp_export_endpoint=${{ inputs.otlp-export-endpoint }}" \
+          -var="tls_client_cert=${{ inputs.tls-client-cert }}" \
+          -var="tls_client_key=${{ inputs.tls-client-key }}" \
+          -var="tls_ca_cert=${{ inputs.tls-ca-cert }}" \
+          -out=tfplan
+
+    - name: Terraform Apply
+      working-directory: terraform
+      shell: bash
+      run: terraform apply tfplan
