@@ -276,115 +276,65 @@ Los tres Service Principals que vas a crear son:
 | QA | `SVPROTELAPPCER01` | `release/*` |
 | Prod | `SVPROTELAPPPRO01` | `main` |
 
-> Este proyecto usa **OIDC con Federated Credentials** en vez de secreto de cliente. Esto es mas seguro porque no hay contraseña que rotar ni que pueda filtrarse — GitHub y Azure se autentican mutuamente usando tokens temporales firmados.
+Usa **Azure Cloud Shell** — el terminal que viene integrado en el portal web, no necesitas instalar nada en tu computadora.
 
-Puedes crearlos desde el **portal web** o con la **CLI**. Elige la que prefieras, el resultado es el mismo.
+**Como abrir Azure Cloud Shell:**
+1. Ve a [portal.azure.com](https://portal.azure.com) e inicia sesion
+2. Click en el icono `>_` en la barra superior (o presiona `Ctrl+~`)
+3. Selecciona **Bash** si te pregunta el tipo de terminal
 
-<details>
-<summary><strong>Opcion A: Portal de Azure (sin instalar nada)</strong></summary>
-
-Repite estos pasos **3 veces**, una por cada ambiente (dev, qa, prod).
-
-**1. Crear la App Registration**
-
-1. Ve a [portal.azure.com](https://portal.azure.com)
-2. Busca **"App registrations"** en la barra de busqueda
-3. Click en **New registration**
-4. Nombre: segun la tabla de arriba (ej: `SVPROTELAPPDES01` para dev) → **Register**
-5. Copia y guarda:
-   - **Application (client) ID** → es tu `AZURE_CLIENT_ID` para este ambiente
-   - **Directory (tenant) ID** → es tu `AZURE_TENANT_ID` (igual en los 3)
-
-**2. Asignar permisos**
-
-1. Busca **"Subscriptions"** → entra a tu suscripcion
-2. Copia el **Subscription ID** → es tu `AZURE_SUBSCRIPTION_ID` (igual en los 3)
-3. Click en **Access control (IAM)** → **Add > Add role assignment**
-4. Rol: **Contributor** → Next
-5. **Select members** → busca el nombre del SP (ej: `SVPROTELAPPDES01`) → Select
-6. **Review + assign**
-
-**3. Crear la Federated Credential**
-
-1. Vuelve a **App registrations** → entra al SP que acabas de crear
-2. Menu izquierdo: **Certificates & secrets** → tab **Federated credentials**
-3. Click en **Add credential** con estos valores segun el ambiente:
-
-| Campo | Dev | QA | Prod |
-|---|---|---|---|
-| Scenario | GitHub Actions | GitHub Actions | GitHub Actions |
-| Organization | `miguelsff` | `miguelsff` | `miguelsff` |
-| Repository | `opentelemetry-custom-collector` | `opentelemetry-custom-collector` | `opentelemetry-custom-collector` |
-| Entity type | Branch | Branch | Branch |
-| Branch | `develop` | `release/*` | `main` |
-| Name | `github-develop` | `github-release` | `github-main` |
-
-</details>
-
-<details>
-<summary><strong>Opcion B: Azure CLI</strong></summary>
-
-Instala Azure CLI si no la tienes:
-- **Windows:** [aka.ms/installazurecliwindows](https://aka.ms/installazurecliwindows)
-- **Mac:** `brew install azure-cli`
-- **Linux:** `curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash`
+Ejecuta el script **3 veces**, cambiando las variables al inicio en cada ejecucion:
 
 ```bash
-az login   # abre el navegador para autenticarte
-```
-
-Ejecuta este script **3 veces**, cambiando los valores de las variables en cada ejecucion:
-
-```bash
-# --- Cambia estos valores segun el ambiente ---
-servicePrincipalName="SVPROTELAPPDES01"   # SVPROTELAPPDES01 | SVPROTELAPPCER01 | SVPROTELAPPPRO01
-BRANCH="develop"                           # develop          | release/*        | main
-CRED_NAME="github-develop"                 # github-develop   | github-release   | github-main
+# ============================================================
+# Ejecutar en Azure Cloud Shell (portal.azure.com > icono >_)
+# Cambiar estas 3 variables en cada ejecucion:
+# ============================================================
+servicePrincipalName="SVPROTELAPPDES01"  # DES01 | CER01 | PRO01
+years=2
+secretName="SVPROTELAPPDES01_secret"     # _secret por ambiente
 REPO="miguelsff/opentelemetry-custom-collector"
-# ----------------------------------------------
+# ============================================================
 
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
 TENANT_ID=$(az account show --query tenantId -o tsv)
 
-# Crea el Service Principal (sin secreto, usaremos OIDC)
+# Crea el Service Principal
 servicePrincipalAppId=$(az ad sp create-for-rbac \
   --name "$servicePrincipalName" \
   --skip-assignment \
+  --years $years \
   --query appId -o tsv)
 
 sleep 5
 
-SP_OBJECT_ID=$(az ad sp show --id "$servicePrincipalAppId" --query id -o tsv)
+# Crea el secreto con nombre identificable
+servicePrincipalSecret=$(az ad app credential reset \
+  --id "$servicePrincipalAppId" \
+  --years $years \
+  --display-name "$secretName" \
+  --query password -o tsv)
 
-# Asigna permisos para crear recursos en la suscripcion
+# Asigna permisos Contributor en la suscripcion
 az role assignment create \
-  --assignee-object-id "$SP_OBJECT_ID" \
-  --assignee-principal-type ServicePrincipal \
+  --assignee "$servicePrincipalAppId" \
   --role Contributor \
   --scope "/subscriptions/$SUBSCRIPTION_ID"
 
-# Configura la autenticacion OIDC con GitHub (sin secreto)
-az ad app federated-credential create --id "$servicePrincipalAppId" --parameters "{
-  \"name\": \"$CRED_NAME\",
-  \"issuer\": \"https://token.actions.githubusercontent.com\",
-  \"subject\": \"repo:${REPO}:ref:refs/heads/${BRANCH}\",
-  \"audiences\": [\"api://AzureADTokenExchange\"]
-}"
-
 echo ""
-echo "Service Principal Name: $servicePrincipalName"
-echo "AZURE_CLIENT_ID:        $servicePrincipalAppId"
-echo "AZURE_TENANT_ID:        $TENANT_ID"
-echo "AZURE_SUBSCRIPTION_ID:  $SUBSCRIPTION_ID"
+echo "=== Guarda estos valores para GitHub Secrets ==="
+echo "AZURE_CLIENT_ID:       $servicePrincipalAppId"
+echo "AZURE_CLIENT_SECRET:   $servicePrincipalSecret"
+echo "AZURE_TENANT_ID:       $TENANT_ID"
+echo "AZURE_SUBSCRIPTION_ID: $SUBSCRIPTION_ID"
 ```
-
-</details>
 
 Al terminar debes tener anotados estos valores para cada ambiente:
 
 | | Dev | QA | Prod |
 |---|---|---|---|
 | `AZURE_CLIENT_ID` | ID de `SVPROTELAPPDES01` | ID de `SVPROTELAPPCER01` | ID de `SVPROTELAPPPRO01` |
+| `AZURE_CLIENT_SECRET` | Secreto de `SVPROTELAPPDES01` | Secreto de `SVPROTELAPPCER01` | Secreto de `SVPROTELAPPPRO01` |
 | `AZURE_TENANT_ID` | (mismo en los 3) | (mismo en los 3) | (mismo en los 3) |
 | `AZURE_SUBSCRIPTION_ID` | (mismo en los 3) | (mismo en los 3) | (mismo en los 3) |
 
@@ -402,6 +352,7 @@ GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipeli
 | Secret | De donde viene |
 |---|---|
 | `AZURE_CLIENT_ID` | El valor `AZURE_CLIENT_ID` del paso anterior |
+| `AZURE_CLIENT_SECRET` | El valor `AZURE_CLIENT_SECRET` del paso anterior |
 | `AZURE_TENANT_ID` | El valor `AZURE_TENANT_ID` del paso anterior |
 | `AZURE_SUBSCRIPTION_ID` | El valor `AZURE_SUBSCRIPTION_ID` del paso anterior |
 | `ACR_LOGIN_SERVER` | Lo obtendras despues del paso 3 (ej: `acrotelcoldev.azurecr.io`) |
@@ -410,7 +361,7 @@ GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipeli
 | `TLS_CLIENT_KEY` | Ver seccion "Certificados TLS" mas abajo |
 | `TLS_CA_CERT` | Ver seccion "Certificados TLS" mas abajo |
 
-> Por ahora agrega los primeros tres (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 3.
+> Por ahora agrega los primeros cuatro (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 3.
 
 #### Paso 3: Crear la infraestructura en Azure
 

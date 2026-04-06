@@ -5,7 +5,6 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write
   contents: write
 
 jobs:
@@ -22,6 +21,7 @@ jobs:
       short-sha: ${{ needs.prepare.outputs.short-sha }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
@@ -36,6 +36,7 @@ jobs:
       image-tag: ${{ needs.promote.outputs.prod-image-tag }}
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       OTLP_EXPORT_ENDPOINT: ${{ secrets.OTLP_EXPORT_ENDPOINT }}
