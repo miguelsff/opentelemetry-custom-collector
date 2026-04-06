@@ -568,7 +568,6 @@ terraform/
     ci-cd-docker-cert.yml           # release/* -> qa (CI + CD)
     ci-cd-docker-prod.yml           # main -> prod (promote + CD)
     # Setup (manuales, una vez)
-    setup-azure-oidc.yml            # Configura Azure AD + OIDC
     bootstrap.yml                   # Crea/destruye infra completa
 collector-configs/
   dev.yaml               # Config con env vars para dev
