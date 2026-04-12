@@ -59,22 +59,8 @@ variable "otlp_export_endpoint" {
   default     = ""
 }
 
-variable "tls_client_cert" {
-  description = "Base64-encoded TLS client certificate for mTLS"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "tls_client_key" {
-  description = "Base64-encoded TLS client private key for mTLS"
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "tls_ca_cert" {
-  description = "Base64-encoded CA certificate for TLS verification"
+variable "otlp_bearer_token" {
+  description = "Bearer token for OTLP exporter authentication"
   type        = string
   default     = ""
   sensitive   = true

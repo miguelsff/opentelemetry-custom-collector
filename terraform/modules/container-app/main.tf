@@ -64,9 +64,9 @@ resource "azurerm_container_app" "this" {
         value = var.debug_verbosity
       }
 
-      volume_mounts {
-        name = "certs"
-        path = "/certs"
+      env {
+        name        = "OTLP_BEARER_TOKEN"
+        secret_name = "otlp-bearer-token"
       }
 
       liveness_probe {
@@ -88,25 +88,11 @@ resource "azurerm_container_app" "this" {
       }
     }
 
-    volume {
-      name         = "certs"
-      storage_type = "Secret"
-    }
   }
 
   secret {
-    name  = "tls-client-cert"
-    value = var.tls_client_cert
-  }
-
-  secret {
-    name  = "tls-client-key"
-    value = var.tls_client_key
-  }
-
-  secret {
-    name  = "tls-ca-cert"
-    value = var.tls_ca_cert
+    name  = "otlp-bearer-token"
+    value = var.otlp_bearer_token
   }
 
   depends_on = [azurerm_role_assignment.acr_pull]

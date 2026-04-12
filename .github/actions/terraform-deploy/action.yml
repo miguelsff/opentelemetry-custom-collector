@@ -14,14 +14,8 @@ inputs:
   otlp-export-endpoint:
     description: "OTLP exporter endpoint"
     required: true
-  tls-client-cert:
-    description: "TLS client certificate (base64)"
-    required: true
-  tls-client-key:
-    description: "TLS client key (base64)"
-    required: true
-  tls-ca-cert:
-    description: "TLS CA certificate (base64)"
+  otlp-bearer-token:
+    description: "Bearer token for OTLP authentication"
     required: true
 
 runs:
@@ -43,9 +37,7 @@ runs:
           -var-file=environments/${{ inputs.environment }}.tfvars \
           -var="image_tag=${{ inputs.image-tag }}" \
           -var="otlp_export_endpoint=${{ inputs.otlp-export-endpoint }}" \
-          -var="tls_client_cert=${{ inputs.tls-client-cert }}" \
-          -var="tls_client_key=${{ inputs.tls-client-key }}" \
-          -var="tls_ca_cert=${{ inputs.tls-ca-cert }}" \
+          -var="otlp_bearer_token=${{ inputs.otlp-bearer-token }}" \
           -out=tfplan
 
     - name: Terraform Apply

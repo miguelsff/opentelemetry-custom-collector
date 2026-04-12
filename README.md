@@ -12,7 +12,7 @@ Custom OpenTelemetry Collector built with [OCB](https://opentelemetry.io/docs/co
 
 ```bash
 # 1. Clonar el repositorio
-git clone https://github.com/miguelsff/opentelemetry-custom-collector.git
+git clone https://github.com/NOMBRE_ORGANIZACION/opentelemetry-custom-collector.git
 cd opentelemetry-custom-collector
 
 # 2. Crear el archivo de configuracion
@@ -292,8 +292,7 @@ Ejecuta el script **3 veces**, cambiando las variables al inicio en cada ejecuci
 # ============================================================
 servicePrincipalName="SVPROTELAPPDES01"  # DES01 | CER01 | PRO01
 years=2
-secretName="SVPROTELAPPDES01_secret"     # _secret por ambiente
-REPO="miguelsff/opentelemetry-custom-collector"
+secretName="${servicePrincipalName}_secret"     # _secret por ambiente
 # ============================================================
 
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -357,9 +356,7 @@ GitHub necesita esos valores para poder hablarle a Azure cuando corra los pipeli
 | `AZURE_SUBSCRIPTION_ID` | El valor `AZURE_SUBSCRIPTION_ID` del paso anterior |
 | `ACR_LOGIN_SERVER` | Lo obtendras despues del paso 3 (ej: `acrotelcoldev.azurecr.io`) |
 | `OTLP_EXPORT_ENDPOINT` | URL de tu backend OTLP (ej: `https://otlp.tubackend.com:4317`) |
-| `TLS_CLIENT_CERT` | Ver seccion "Certificados TLS" mas abajo |
-| `TLS_CLIENT_KEY` | Ver seccion "Certificados TLS" mas abajo |
-| `TLS_CA_CERT` | Ver seccion "Certificados TLS" mas abajo |
+| `OTLP_BEARER_TOKEN` | Token de autenticacion Bearer para el backend OTLP |
 
 > Por ahora agrega los primeros cuatro (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). Los demas los agregas despues del paso 3.
 
@@ -456,39 +453,17 @@ Los recursos de cada ambiente se configuran en `terraform/environments/`:
 | Replicas max | 1 | 2 | 5 |
 | ACR SKU | Basic | Basic | Standard |
 
-### Certificados TLS
+### Autenticacion Bearer token
 
-El collector se comunica con el backend OTLP usando mTLS (mutual TLS): ambos lados se autentican con certificados. Necesitas tres archivos:
+El collector se autentica con el backend OTLP usando un Bearer token en el header `Authorization`. Tu proveedor OTLP (Grafana Cloud, Honeycomb, Datadog, etc.) te proporciona este token desde su panel de configuracion.
 
-| Archivo | Para que sirve |
+Guardalo como secret en cada GitHub Environment:
+
+| Secret | Valor |
 |---|---|
-| `client.crt` | Identifica al collector ante el backend |
-| `client.key` | Clave privada del certificado del collector |
-| `ca.crt` | Autoridad de certificacion que firmó los certificados |
+| `OTLP_BEARER_TOKEN` | El token tal cual lo proporciona tu backend (sin base64) |
 
-Tu proveedor de backend OTLP (Grafana Cloud, Datadog, etc.) te da estos archivos. Si estas en un entorno de prueba, puedes generar certificados autofirmados:
-
-```bash
-# Solo para pruebas locales - NO usar en produccion
-openssl req -x509 -newkey rsa:4096 -keyout client.key -out client.crt -days 365 -nodes -subj "/CN=otelcol-client"
-cp client.crt ca.crt  # En pruebas el cliente es su propia CA
-```
-
-Una vez que tienes los tres archivos, conviertelos a base64 para guardarlos como secrets en GitHub:
-
-```bash
-# En Linux/Mac
-base64 -w 0 client.crt   # copia el resultado como TLS_CLIENT_CERT
-base64 -w 0 client.key   # copia el resultado como TLS_CLIENT_KEY
-base64 -w 0 ca.crt       # copia el resultado como TLS_CA_CERT
-
-# En Windows (PowerShell)
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("client.crt"))
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("client.key"))
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("ca.crt"))
-```
-
-Terraform monta automaticamente esos valores como archivos dentro del Container App en `/certs/`.
+Terraform lo inyecta automaticamente como variable de entorno dentro del Container App.
 
 ### Configuracion del collector por ambiente
 
@@ -498,10 +473,8 @@ Los archivos `collector-configs/{dev,qa,prod}.yaml` leen la configuracion desde 
 exporters:
   otlp:
     endpoint: ${env:OTLP_EXPORT_ENDPOINT}
-    tls:
-      cert_file: /certs/client.crt
-      key_file: /certs/client.key
-      ca_file: /certs/ca.crt
+    headers:
+      Authorization: "Bearer ${env:OTLP_BEARER_TOKEN}"
 ```
 
 ### Estructura del despliegue

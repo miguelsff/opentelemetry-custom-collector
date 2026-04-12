@@ -22,11 +22,7 @@ on:
         required: true
       OTLP_EXPORT_ENDPOINT:
         required: true
-      TLS_CLIENT_CERT:
-        required: true
-      TLS_CLIENT_KEY:
-        required: true
-      TLS_CA_CERT:
+      OTLP_BEARER_TOKEN:
         required: true
 
 permissions:
@@ -58,6 +54,4 @@ jobs:
           image-tag: ${{ inputs.image-tag }}
           tf-state-key: ${{ inputs.environment }}.tfstate
           otlp-export-endpoint: ${{ secrets.OTLP_EXPORT_ENDPOINT }}
-          tls-client-cert: ${{ secrets.TLS_CLIENT_CERT }}
-          tls-client-key: ${{ secrets.TLS_CLIENT_KEY }}
-          tls-ca-cert: ${{ secrets.TLS_CA_CERT }}
+          otlp-bearer-token: ${{ secrets.OTLP_BEARER_TOKEN }}

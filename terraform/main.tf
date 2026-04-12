@@ -35,8 +35,6 @@ module "container_app" {
   min_replicas               = var.min_replicas
   max_replicas               = var.max_replicas
   otlp_export_endpoint       = var.otlp_export_endpoint
-  tls_client_cert            = var.tls_client_cert
-  tls_client_key             = var.tls_client_key
-  tls_ca_cert                = var.tls_ca_cert
+  otlp_bearer_token          = var.otlp_bearer_token
   debug_verbosity            = var.debug_verbosity
 }

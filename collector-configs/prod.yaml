@@ -20,10 +20,8 @@ exporters:
     verbosity: ${env:DEBUG_VERBOSITY}
   otlp:
     endpoint: ${env:OTLP_EXPORT_ENDPOINT}
-    tls:
-      cert_file: /certs/client.crt
-      key_file: /certs/client.key
-      ca_file: /certs/ca.crt
+    headers:
+      Authorization: "Bearer ${env:OTLP_BEARER_TOKEN}"
 
 service:
   extensions: [health_check]
